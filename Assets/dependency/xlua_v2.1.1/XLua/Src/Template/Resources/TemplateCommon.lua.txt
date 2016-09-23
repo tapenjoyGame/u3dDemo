@@ -1,0 +1,289 @@
+local friendlyNameMap = {
+	["System.Object"] = "object",
+	["System.String"] = "string",
+	["System.Boolean"] = "bool",
+	["System.Byte"] = "byte",
+	["System.Char"] = "char",
+	["System.Decimal"] = "decimal",
+	["System.Double"] = "double",
+	["System.Int16"] = "short",
+	["System.Int32"] = "int",
+	["System.Int64"] = "long",
+	["System.SByte"] = "sbyte",
+	["System.Single"] = "float",
+	["System.UInt16"] = "ushort",
+	["System.UInt32"] = "uint",
+	["System.UInt64"] = "ulong",
+	["System.Void"] = "void",
+}
+
+local fixChecker = {
+    --["System.String"] = "LuaAPI.lua_isstring",
+	["System.Boolean"] = "LuaTypes.LUA_TBOOLEAN == LuaAPI.lua_type",
+	["System.Byte"] = "LuaTypes.LUA_TNUMBER == LuaAPI.lua_type",
+	["System.Char"] = "LuaTypes.LUA_TNUMBER == LuaAPI.lua_type",
+	["System.Decimal"] = "LuaTypes.LUA_TNUMBER == LuaAPI.lua_type",
+	["System.Double"] = "LuaTypes.LUA_TNUMBER == LuaAPI.lua_type",
+	["System.Int16"] = "LuaTypes.LUA_TNUMBER == LuaAPI.lua_type",
+	["System.Int32"] = "LuaTypes.LUA_TNUMBER == LuaAPI.lua_type",
+	--["System.Int64"] = "LuaTypes.LUA_TNUMBER == LuaAPI.lua_type",
+	["System.SByte"] = "LuaTypes.LUA_TNUMBER == LuaAPI.lua_type",
+	["System.Single"] = "LuaTypes.LUA_TNUMBER == LuaAPI.lua_type",
+	["System.UInt16"] = "LuaTypes.LUA_TNUMBER == LuaAPI.lua_type",
+	["System.UInt32"] = "LuaTypes.LUA_TNUMBER == LuaAPI.lua_type",
+	--["System.UInt64"] = "LuaTypes.LUA_TNUMBER == LuaAPI.lua_type",
+	["System.IntPtr"] = "LuaTypes.LUA_TLIGHTUSERDATA == LuaAPI.lua_type",
+}
+
+local typedCaster = {
+	["System.Byte"] = "LuaAPI.lua_tonumber",
+	["System.Char"] = "LuaAPI.lua_tonumber",
+	["System.Decimal"] = "LuaAPI.lua_tonumber",
+	["System.Int16"] = "LuaAPI.lua_tonumber",
+	["System.Int32"] = "LuaAPI.lua_tonumber",
+	["System.Int64"] = "LuaAPI.lua_toint64",
+	["System.SByte"] = "LuaAPI.lua_tonumber",
+	["System.Single"] = "LuaAPI.lua_tonumber",
+	["System.UInt16"] = "LuaAPI.lua_tonumber",
+	["System.UInt32"] = "LuaAPI.lua_tonumber",
+	["System.UInt64"] = "LuaAPI.lua_touint64",
+}
+
+local fixCaster = {
+	["System.Double"] = "LuaAPI.lua_tonumber",
+    ["System.String"] = "LuaAPI.lua_tostring",
+	["System.Boolean"] = "LuaAPI.lua_toboolean",
+    ["System.Byte[]"] = "LuaAPI.lua_tobytes",
+	["System.IntPtr"] = "LuaAPI.lua_touserdata",
+}
+
+local fixPush = {
+	["System.Byte"] = "LuaAPI.lua_pushnumber",
+	["System.Char"] = "LuaAPI.lua_pushnumber",
+	["System.Int16"] = "LuaAPI.lua_pushnumber",
+	["System.Int32"] = "LuaAPI.lua_pushnumber",
+	["System.Int64"] = "LuaAPI.lua_pushint64",
+	["System.SByte"] = "LuaAPI.lua_pushnumber",
+	["System.Single"] = "LuaAPI.lua_pushnumber",
+	["System.UInt16"] = "LuaAPI.lua_pushnumber",
+	["System.UInt32"] = "LuaAPI.lua_pushnumber",
+	["System.UInt64"] = "LuaAPI.lua_pushuint64",
+    ["System.Single"] = "LuaAPI.lua_pushnumber",
+    ["System.Double"] = "LuaAPI.lua_pushnumber",
+    ["System.String"] = "LuaAPI.lua_pushstring",
+	["System.Byte[]"] = "LuaAPI.lua_pushstring",
+	["System.Boolean"] = "LuaAPI.lua_pushboolean",
+	["System.IntPtr"] = "LuaAPI.lua_pushlightuserdata",
+	["System.Object"] = "translator.PushAny",
+}
+
+local notranslator = {
+	["System.Byte"] = true,
+	["System.Char"] = true,
+	["System.Decimal"] = true,
+	["System.Int16"] = true,
+	["System.Int32"] = true,
+	["System.Int64"] = true,
+	["System.SByte"] = true,
+	["System.Single"] = true,
+	["System.UInt16"] = true,
+	["System.UInt32"] = true,
+	["System.UInt64"] = true,
+    ["System.Double"] = true,
+    ["System.String"] = true,
+	["System.Boolean"] = true,
+    ["System.Void"] = true,
+	["LuaInterface.LuaTable"] = true,
+	["LuaInterface.LuaFunction"] = true,
+	["System.IntPtr"] = true,
+}
+
+function ForEachCsList(list, callback)
+    for i = 0, (list.Count or list.Length) - 1 do 
+        callback(list[i], i)
+    end
+end
+function CalcCsList(list, predicate)
+    local count = 0
+    for i = 0, (list.Count or list.Length) - 1 do 
+        if predicate(list[i], i) then count = count + 1 end
+    end
+    return count
+end
+function IfAny(list, predicate)
+    for i = 0, (list.Count or list.Length) - 1 do 
+        if predicate(list[i], i) then return true end
+    end
+    return false
+end
+function CsFullTypeName(t)
+    if t.IsArray then
+        return CsFullTypeName(t:GetElementType()) .. '[' .. string.rep(',', t:GetArrayRank() - 1) .. ']'
+    elseif t.IsByRef then
+        return CsFullTypeName(t:GetElementType())
+    end
+    local name = t.FullName:gsub("&", ""):gsub("%+", ".") 
+    if not t.IsGenericType then 
+        return friendlyNameMap[name] or name
+    end
+	local genericParameter = ""
+    ForEachCsList(t:GetGenericArguments(), function(at, ati)
+        if ati ~= 0 then  genericParameter = genericParameter .. ', ' end
+        genericParameter = genericParameter .. CsFullTypeName(at)
+    end)
+    return name:gsub("`%d+", '<' .. genericParameter .. '>'):gsub("%[%[.*", "")
+end
+
+function CSVariableName(t)
+    return t:ToString():gsub("&", ""):gsub("%+", ""):gsub("`", "_"):gsub("%.", ""):gsub("%[", ""):gsub("%]", ""):gsub(",", "")
+end
+
+function GetCheckStatement(t, idx)
+    local testname = t.FullName:gsub("&", "")
+    if testname ==  "System.String" or testname == "System.Byte[]" then
+        return "(LuaAPI.lua_isnil(L, " .. idx .. ") || LuaAPI.lua_type(L, ".. idx ..") == LuaTypes.LUA_TSTRING)" 
+    elseif testname == "System.Int64" then
+        return "(LuaTypes.LUA_TNUMBER == LuaAPI.lua_type(L, ".. idx ..") || LuaAPI.lua_isint64(L, ".. idx .."))"
+    elseif testname == "System.UInt64" then
+        return "(LuaTypes.LUA_TNUMBER == LuaAPI.lua_type(L, ".. idx ..") || LuaAPI.lua_isuint64(L, ".. idx .."))"
+    elseif testname == "LuaInterface.LuaTable" then
+        return "(LuaAPI.lua_isnil(L, " .. idx .. ") || LuaAPI.lua_type(L, ".. idx ..") == LuaTypes.LUA_TTABLE)" 
+	elseif testname == "LuaInterface.LuaFunction" then
+        return "(LuaAPI.lua_isnil(L, " .. idx .. ") || LuaAPI.lua_type(L, ".. idx ..") == LuaTypes.LUA_TFUNCTION)" 
+    end
+    return (fixChecker[testname] or ("translator.Assignable<" .. CsFullTypeName(t).. ">")) .. "(L, ".. idx ..")" 
+end
+
+local delegateType = typeof(CS.System.Delegate)
+
+local ExtensionAttribute = typeof(CS.System.Runtime.CompilerServices.ExtensionAttribute)
+function MethodParameters(method)
+    if not method:IsDefined(ExtensionAttribute, false) then
+        return method:GetParameters()
+    else
+        local parameters = method:GetParameters()
+        local ret = {}
+        for i = 1, parameters.Length - 1 do 
+            ret[i - 1] = parameters[i]
+        end
+        ret.Length = parameters.Length - 1
+        return ret
+    end
+end
+
+function IsStruct(t)
+    if t.IsByRef then t = t:GetElementType() end
+    return t.IsValueType and not t.IsPrimitive and not t.IsEnum and (t ~= typeof(CS.System.Decimal))
+end
+
+function GetCasterStatement(t, idx, var_name, need_declare, is_v_params)
+    local testname = t.FullName:gsub("&", "")
+	local statement = ""
+    local is_struct = IsStruct(t)
+	
+    if need_declare then
+        statement = CsFullTypeName(t) .. " " .. var_name
+        if is_struct and not typedCaster[testname] and not fixCaster[testname] then
+            statement = statement .. ";"
+        else
+            statement = statement .. " = "
+        end
+    elseif not is_struct then
+	    statement = var_name .. " = "
+    end
+	
+    if is_v_params then
+        return statement .. "translator.GetParams<" .. CsFullTypeName(t:GetElementType()).. ">" .. "(L, ".. idx ..")" 
+    elseif typedCaster[testname] then
+        return statement .. "(" .. CsFullTypeName(t) .. ")" ..typedCaster[testname] .. "(L, ".. idx ..")" 
+	elseif delegateType:IsAssignableFrom(t) then
+	    return statement .. "translator.GetDelegate<" .. CsFullTypeName(t).. ">" .. "(L, ".. idx ..")" 
+    elseif fixCaster[testname] then
+        return statement .. fixCaster[testname] .. "(L, ".. idx ..")" 
+    elseif testname == "System.Object" then
+        return statement .. "translator.GetObject(L, ".. idx ..", typeof(" .. CsFullTypeName(t) .."))"
+    elseif is_struct then
+        return statement .. "translator.Get(L, ".. idx ..", out " .. var_name .. ")"
+    else
+        return statement .. "("..CsFullTypeName(t)..")translator.GetObject(L, ".. idx ..", typeof(" .. CsFullTypeName(t) .."))" 
+    end
+end
+
+local paramsAttriType = typeof(CS.System.ParamArrayAttribute)
+function IsParams(pi)
+    return pi:IsDefined(paramsAttriType, false)
+end
+
+local objectType = typeof(CS.System.Object)
+function GetSelfStatement(t)
+    local fulltypename = CsFullTypeName(t)
+    local is_struct = IsStruct(t)
+    if is_struct then
+	    return fulltypename .. " __cl_gen_to_be_invoked;translator.Get(L, 1, out __cl_gen_to_be_invoked)"
+	else
+	    if t == objectType then
+            return "object __cl_gen_to_be_invoked = translator.FastGetCSObj(L, 1)"
+        else
+            return fulltypename .. " __cl_gen_to_be_invoked = (" .. fulltypename .. ")translator.FastGetCSObj(L, 1)"
+        end
+	end
+    
+end
+
+--[[
+function GetAssignmentStatement(var_name, t, idx, need_declare)
+    local testname = t.FullName:gsub("&", "")
+    local fulltypename = CsFullTypeName(t)
+    local statement = ""
+    
+    if typedCaster[testname] or fixCaster[testname] then
+        if need_declare then
+            statement =  fulltypename .. " "
+        end
+        statement = statement .. var_name .. " = " 
+        if typedCaster[testname] then
+            statement = statement .. "(" .. fulltypename .. ")"
+        end
+        statement = statement .. (typedCaster[testname] or fixCaster[testname]) .. "(L, ".. idx ..");" 
+    else
+        if need_declare then
+            statement = fulltypename .. " " .. var_name .. "; " 
+        end
+        statement = statement .. "translator.Get(L, ".. idx ..", out " .. var_name ..");" 
+    end
+    
+    return statement
+end
+]]
+
+function GetPushStatement(t, variable)
+    local testname = t.FullName:gsub("&", "")
+    if fixPush[testname] then
+        return fixPush[testname] .. "(L, ".. variable ..")" 
+	elseif testname == "LuaInterface.LuaTable" or testname == "LuaInterface.LuaFunction" then
+	    return variable .. '.push(L)'
+    elseif testname == "System.Decimal" then
+        return "LuaAPI.lua_pushnumber(L, System.Convert.ToDouble(" ..variable .. "))"
+    else
+        return "translator.Push(L, "..variable..")"
+    end
+end
+
+function JustLuaType(t)
+    return notranslator[t.FullName:gsub("&", "")]
+end
+
+function CallNeedTranslator(overload, isdelegate)
+    if not overload.IsStatic and not isdelegate then return true end
+    if not notranslator[overload.ReturnType.FullName:gsub("&", "")] then return true end 
+    local parameters = overload:GetParameters()
+    return IfAny(overload:GetParameters(), function(parameter) return not notranslator[parameter.ParameterType.FullName:gsub("&", "")] end)
+end
+
+function MethodCallNeedTranslator(method)
+    return IfAny(method.Overloads, function(overload) return CallNeedTranslator(overload) end)
+end
+
+function AccessorNeedTranslator(accessor)
+    return not accessor.IsStatic or not JustLuaType(accessor.Type)
+end
